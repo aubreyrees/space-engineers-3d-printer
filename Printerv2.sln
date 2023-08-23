@@ -1,0 +1,22 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 16
+VisualStudioVersion = 16.0.30128.74
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Printerv2", "Printerv2\Printerv2.csproj", "{C0768E39-1EC0-4730-9A00-304B1AFFF06D}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|x64 = Debug|x64
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{C0768E39-1EC0-4730-9A00-304B1AFFF06D}.Debug|x64.ActiveCfg = Debug|x64
+		{C0768E39-1EC0-4730-9A00-304B1AFFF06D}.Debug|x64.Build.0 = Debug|x64
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {6FFD1CCD-13F7-47C3-B06B-2CEA2594B787}
+	EndGlobalSection
+EndGlobal
