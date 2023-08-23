@@ -25,12 +25,10 @@ namespace IngameScript
 
     enum PistonDirection { XPos, XNeg, YPos, YNeg, ZPos, ZNeg }
 
-
-    
-
     partial class Program : MyGridProgram
     {
-        public PistonDirection PistonDirectionInvert(PistonDirection direction)
+        /// Return the piston direction that is the inverse of the passed direction
+        static public PistonDirection PistonDirectionInvert(PistonDirection direction)
         {
             switch (direction)
             {
@@ -52,8 +50,9 @@ namespace IngameScript
             }
         }
   
-        public string PistonDirectionToString(PistonDirection direction)
+        static public string PistonDirectionToString(PistonDirection direction)
         {
+            /// Return a string representation of the piston direction
             switch (direction)
             {
                 case PistonDirection.XPos:
@@ -74,6 +73,7 @@ namespace IngameScript
             }
         }
 
+        /// Encapsulate the scripts configuration
         class Config
         {
             public string printerTag;
@@ -90,7 +90,9 @@ namespace IngameScript
             public string zReverseTag;
         }
 
-        class PrinterState
+
+        /// Container for a printer's pistons 
+        class PrinterPistons
         {
             public Dictionary<PistonDirection, List<IMyPistonBase>> pistons;
             public List<PistonDirection> pistonDirectionList;
@@ -99,12 +101,8 @@ namespace IngameScript
             public Dictionary<PistonDirection, string> Tags;
             public bool init;
 
-            public PrinterState()
+            public PrinterPistons()
             {
-                init = false;
-            }
-
-            public void InitVars() {
                 pistonDirectionList = new List<PistonDirection>{
                     PistonDirection.XNeg,
                     PistonDirection.XPos,
@@ -123,9 +121,12 @@ namespace IngameScript
                      Base6Directions.Direction.Down
                 };
 
-            }
+                directonMap = new Dictionary<Base6Directions.Direction, PistonDirection?>();
+                foreach (var baseDirection in baseDirectionList)
+                {
+                    directonMap[baseDirection] = null;
+                }
 
-            public void InitPistons() {
                 pistons = new Dictionary<PistonDirection, List<IMyPistonBase>>();
                 foreach (var pistonDirection in pistonDirectionList)
                 {
@@ -133,23 +134,33 @@ namespace IngameScript
                 }
             }
 
-            public void InitDirectionMap()
-            {
-                directonMap = new Dictionary<Base6Directions.Direction, PistonDirection?>();
-                foreach (var baseDirection in baseDirectionList)
-                {
-                    directonMap[baseDirection] = null;
-                }
-            }
-
-            public void addPiston(PistonDirection direction, IMyPistonBase piston)
+            public void AddPiston(PistonDirection direction, IMyPistonBase piston)
             {
                 pistons[direction].Add(piston);
             }
+
+            public void AddPiston(Base6Directions.Direction direction, IMyPistonBase piston)
+            {
+                if (directonMap[direction].HasValue)
+                {
+                    pistons[directonMap[direction].Value].Add(piston);
+                }
+                else
+                {
+                    throw new Exception("Cannot add a psiton using GRF when GRF is not yet mapped.");
+                }
+            }
+
+            public bool DirectionIsTagged(Base6Directions.Direction direction)
+            {
+                return directonMap[direction].HasValue;
+            }
         }
 
+        /// Conifguration parseer
         class ConfigParser
         {
+            ///  All possible states of the parser
             enum State
             {
                 StartOfLine,
@@ -166,6 +177,7 @@ namespace IngameScript
                 MaybeKeyRepeat
             }
 
+            /// 
             enum ConfigKeySymbols
             {
                 XPos,
@@ -182,6 +194,8 @@ namespace IngameScript
                 ZExt
             }
 
+            /// Based on the initial keys on the configuration variable
+            /// we choose which  to 
             enum TreePath
             {
                 XPath,
@@ -190,19 +204,31 @@ namespace IngameScript
                 SPath
             }
 
+            /// Each configuration key is associated with a data type. This
+            /// represents the data that is expected and it is an error if 
+            /// this expecation is not met.
             enum Expect
             {
                 String,
                 Float,
-                Integer
+                Integer // TODO: are there integers?
             }
 
-            enum StringQuote
+            ///  Return states of a subparser
+            enum ParseLoopReturn
             {
-                Double,
-                Single
+                Error,
+                Ok,
+                NewLine
             }
 
+            /// raise this exception if we get an unknown enum member
+            Exception BadEnum()
+            {
+                return new Exception("Uknown enum member");
+            }
+
+            /// the strings 
             const string printerTagDefault = "pp";
             const string xForwardTagDefault = "x+";
             const string xReverseTagDefault = "x-";
@@ -211,19 +237,37 @@ namespace IngameScript
             const string zForwardTagDefault = "z+";
             const string zReverseTagDefault = "z-";
 
-            InfoDisplay infoDisplay;
-            int line_no;
-            int key_idx;
-            Dictionary<ConfigKeySymbols, int> symbolTrack;
-            State state;
-            Expect? expect;
-            ConfigKeySymbols? key;
-            Config cfObj;
-            string buffer;
-            string line_buffer;
-            TreePath? treePath;
+
+            ///  The string being parsed.
             string src;
-            StringQuote? stringQuote;
+            /// The sink to which status information is to be sent
+            InfoDisplay infoDisplay;
+            ///  The configuration object to which the parsed configuration
+            ///  values are to be set
+            Config cfObj;
+
+            ///  The current line of `src` that is being parsed
+            int line_no;
+            /// Contains all characters in the current line
+            string line_buffer;
+            int key_idx;
+
+
+            string buffer;
+            TreePath? treePath;
+
+            ///  The current state of the parser
+            State state;
+            /// The currently expected data type
+            Expect? expect;
+            ///  The current configuration key that is being parsed
+            ConfigKeySymbols? key;
+            ///  if parsing a string this is True if the string is quoted
+            ///  with a double quote else False
+            bool? isDoubleQuote;
+            ///  track the first line where a setting is declared for
+            ///  possible debugging 
+            Dictionary<ConfigKeySymbols, int> symbolTrack;
 
             public ConfigParser(InfoDisplay info, ref Config config, string str)
             {
@@ -232,7 +276,8 @@ namespace IngameScript
                 src = str;
             }
 
-
+            /// Set the appropiate variable on the configuration object
+            /// to the passed value
             void ConfigSetter(string v)
             {
                 switch (key.Value)
@@ -282,11 +327,22 @@ namespace IngameScript
                 state = State.EndOfLine;
             }
 
+            /// Set the appropiate variable on the configuration object
+            /// to the value in the buffer
+            void ConfigSetter()
+            {
+                ConfigSetter(buffer);
+            }
+
+            /// Return a string representation of the current key configuration
+            /// key symbol
             string KeyToString()
             {
                 return KeyToString(key.Value);
             }
 
+            /// Return a string representation of the passed configuration
+            /// key symbol
             string KeyToString(ConfigKeySymbols sym)
             {
                 switch (sym)
@@ -320,6 +376,8 @@ namespace IngameScript
                 }
             }
 
+            /// Get the expected return type for the setting
+            /// represented by the passed configuration symbol
             Expect GetSymExpectedType(ConfigKeySymbols sym)
             {
                 switch (sym)
@@ -343,23 +401,489 @@ namespace IngameScript
                 }
             }
 
-            enum ParseLoopReturn
+            /// Return " if isDoubleQuote is True else '
+            char QuoteChar(bool isDoubleQuote)
             {
-                Error,
-                Ok,
-                NewLine
+                return isDoubleQuote ? '"' : '\'';
             }
 
+            /// Send an error message to the info display and return an error
+            /// state
             ParseLoopReturn Error(string msg)
             {
                 infoDisplay.addError(string.Format("Error parsing conifg (line {0}) : {1}", line_no, msg));
                 return ParseLoopReturn.Error;
             }
 
+
+            /// Send a status message to the info display and return an error
+            /// state
             void Status(string msg)
             {
                 infoDisplay.addToBody(msg + "\n");
             }
+
+            /// Helper that progress eskey parsing state
+            void ProgressKeyState(bool finish)
+            {
+                if (finish)
+                {
+                    state = State.KeyEnd;
+                    key_idx = 0;
+                }
+                else
+                {
+                    key_idx += 1;
+                }
+            }
+
+            /// Helper to set state for an unknown key and reset key parsing state.
+            void UnknownKey()
+            {
+                state = State.UnknowKey;
+                key_idx = 0;
+                treePath = null;
+                key = null;
+            }
+
+            /// Setup the symbolic represention of the current parsed setting
+            /// if this symbol has already been seen then we enter a fail state
+            ParseLoopReturn SymHelper(ConfigKeySymbols sym, bool? con)
+            {
+                if (symbolTrack[sym] == 0)
+                {
+                    // Symbol not seen, everything is happy
+
+                    // save the symbol as current key
+                    key = sym;
+
+                    // Remeber where this symbol was used in 
+                    // case of future debugging needs
+                    symbolTrack[sym] = line_no;
+
+                    // Now we know which setting we've got we can
+                    // forecase what type the settings value should be
+                    expect = GetSymExpectedType(sym);
+
+                    // The setting has been finalised, no need
+                    // to keep markers to possible alternatives
+                    treePath = null;
+
+                    // And progress are parser state if required
+                    if (con != null)
+                    {
+                        ProgressKeyState(!con.Value);
+                    }
+
+                    return ParseLoopReturn.Ok;
+                }
+                else if (con.Value)
+                {
+                    // If we end up here then either the key is bad or the key is repeated
+                    // but we don't know which yet
+                    state = State.MaybeKeyRepeat;
+                    key = sym;
+                    return ParseLoopReturn.Ok;
+                }
+                else {
+                    return Error(string.Format("{0} key is appears on lines {1} and {2}; keys may only be used once.", KeyToString(sym), symbolTrack[sym], line_no));
+                }
+            }
+
+            /// helper called when parsing a setting for a certain direction
+            ParseLoopReturn DimHelper(char c, ConfigKeySymbols pos, ConfigKeySymbols neg, ConfigKeySymbols ext)
+            {
+                switch (c)
+                {
+                    case '+':
+                        return SymHelper(pos, false);
+                    case '-':
+                        return SymHelper(neg, false);
+                    case 'e':
+                    case 'E':
+                        return SymHelper(ext, true);
+                    default:
+                        UnknownKey();
+                        return ParseLoopReturn.Ok;
+                }
+            }
+
+            /// Helper to validate string representing key
+            /// key_offset is where this helper starts examining the string from
+            /// test is the character currently being parsed
+            /// cs are the candidate characters to test against. These are provided as
+            /// upper and lower case pairs and test is compared to both - a cludge
+            /// but it gets where wed need to go
+            ParseLoopReturn KeyParseHelper(int key_offset, char test, params char[] cs)
+            {
+                int idx = 2 * (key_idx - key_offset);
+
+                Status(String.Format("test possible key letter `{0}` (key_idx: {3}, expect `{1}` or `{2}`)", test, cs[idx], cs[idx + 1], key_idx));
+
+                if (cs[idx] == test || cs[idx + 1] == test)
+                {
+                    ProgressKeyState(idx + 2 == cs.Length);
+                }
+                else
+                {
+                    UnknownKey();
+                }
+                return ParseLoopReturn.Ok;
+            }
+
+
+            /// attempt to parse c as part of a numeric value. This parse function
+            /// allows the number to contain a decimal point.
+            ParseLoopReturn ParseNumeric(char c)
+            {
+                switch (c) {
+                    case '0':
+                    case '1':
+                    case '2':
+                    case '3':
+                    case '4':
+                    case '5':
+                    case '6':
+                    case '7':
+                    case '8':
+                    case '9':
+                        buffer += c;
+                        return ParseLoopReturn.Ok;
+                    case '.':
+                    case ',':
+                        buffer += c;
+                        state = State.PostDecimal;
+                        return ParseLoopReturn.Ok;
+                    default:
+                        return Error(string.Format("Character not allowed: expected float value, found `{0}`", c));
+                }
+            }
+            /// attempt to parse c as part of a numeric value. This parse function
+            /// does not allows the number to contain a decimal point.
+            /// 
+            /// TODO: are there integers? is this always a float?
+            ParseLoopReturn ParseNumericNoDecimal(char c, bool isFloat)
+            {
+                switch (c)
+                {
+                    case '0':
+                    case '1':
+                    case '2':
+                    case '3':
+                    case '4':
+                    case '5':
+                    case '6':
+                    case '7':
+                    case '8':
+                    case '9':
+                        buffer += c;
+                        return ParseLoopReturn.Ok;
+                    case '.':
+                    case ',':
+                        // Decimal points are not allowed
+                        if (isFloat)
+                        {
+                            return Error("Invalid floating point number (multiple decimal points?)");
+                        }
+                        else
+                        {
+                            return Error("Invalid integer, no decimal points allowed");
+                        }
+                    default:
+                        return Error(string.Format("Character not allowed: expected float value, found `{0}`", c));
+                }
+            }
+
+            /// Parse a character
+            private ParseLoopReturn ParseLoop(char c)
+            {
+                if (c == '\n')
+                {
+                    Status("found new line");
+                    switch (state)
+                    {
+                        case State.String:
+                        case State.Escape:
+                            // The string has a well defineded end (the closing quote)
+                            // A suprised end means the string was not complete - fail
+                            return Error(string.Format("String does not have closing quote (opened with a {0})", QuoteChar(isDoubleQuote.Value)));
+                        case State.Key:
+                        case State.KeyValueDelim:
+                        case State.KeyEnd:
+                        case State.UnknowKey:
+                        case State.MaybeKeyRepeat:
+                            // The setting name was still being parsed - fail
+                            return Error("Unexpected line end; line must must have a key and a value but only found key or partial key");
+                        case State.Float:
+                        case State.PostDecimal:
+                            // Posibble that a float value for the setting has
+                            // een parsed but not yet saved to the setting -
+                            // save it now
+                            ConfigSetter();
+                            return ParseLoopReturn.NewLine;
+                        case State.EndOfLine:
+                        case State.StartOfLine:
+                        case State.Ignore:
+                            // Blank lines, expected end of lines and ingored
+                            // remainding of lines make us happy
+                            return ParseLoopReturn.NewLine;
+                        default:
+                            throw BadEnum();
+                    }
+                }
+                else if (state == State.Ignore)
+                {
+                    // The rest of this line has been marked to be ignored,
+                    // continue
+                    return ParseLoopReturn.Ok;
+                }
+                else if (state == State.Key)
+                {
+                    // we have started parsing a key so lets continue...
+
+                    if (key != null)
+                    {
+                        // If we are then there's only one possible setting
+                        // name that can match the characters already passed
+                        // so all that's left to do is validate the remaining
+                        // characters in the setting name
+                        switch (key)
+                        {
+                            case ConfigKeySymbols.PrinterTag:
+                                return KeyParseHelper(1, c, 'a', 'A', 'g', 'G');
+                            case ConfigKeySymbols.Step:
+                                return KeyParseHelper(2, c, 'e', 'E', 'p', 'P');
+                            case ConfigKeySymbols.Speed:
+                                return KeyParseHelper(2, c, 'e', 'E', 'e', 'E', 'd', 'D');
+                            case ConfigKeySymbols.XExt:
+                            case ConfigKeySymbols.YExt:
+                            case ConfigKeySymbols.ZExt:
+                                return KeyParseHelper(2, c, 'x', 'X', 't', 'T');
+                            default:
+                                throw BadEnum();
+                        }
+                    }
+                    else
+                    {
+                        switch (treePath)
+                        {
+                            // If we end up here we have narrowed the possible
+                            // setting names that will match but there's still
+                            // multiple options - narrow the choices down further
+                            case TreePath.XPath:
+                                return DimHelper(c, ConfigKeySymbols.XPos, ConfigKeySymbols.XNeg, ConfigKeySymbols.XExt);
+                            case TreePath.YPath:
+                                return DimHelper(c, ConfigKeySymbols.YPos, ConfigKeySymbols.YNeg, ConfigKeySymbols.YExt);
+                            case TreePath.ZPath:
+                                return DimHelper(c, ConfigKeySymbols.ZPos, ConfigKeySymbols.ZNeg, ConfigKeySymbols.ZExt);
+                            case TreePath.SPath:
+                                switch (c)
+                                {
+                                    case 't':
+                                    case 'T':
+                                        return SymHelper(ConfigKeySymbols.Step, true);
+                                    case 'p':
+                                    case 'P':
+                                        return SymHelper(ConfigKeySymbols.Speed, true);
+                                    default:
+                                        UnknownKey();
+                                        return ParseLoopReturn.Ok;
+                                }
+                            default:
+                                throw BadEnum();
+                        }
+                    }
+                }
+                else if (state == State.Escape)
+                {
+                    // This character has been escaped by the last character
+                    // make sure this a character than is allowed to be escaped
+                    // and add it to the buffer if it is. Else fail
+                    if (c == '\'' || c == '\\' || c == '"')
+                    {
+                        Status("found escaped character");
+                        state = State.String;
+                        buffer += c;
+                        return ParseLoopReturn.Ok;
+                    }
+                    else
+                    {
+                        return Error("Only `\"`, `'` and `\\` characters can be escaped");
+                    }
+                }
+                else if (state == State.String)
+                {
+                    if ((c == '\'' && (!isDoubleQuote.Value)) || (c == '"' && isDoubleQuote.Value))
+                    {
+                        // We have found the quote matching the starting quote of the string 
+                        // finish parsing the string value
+                        Status("found end of quoted string");
+                        isDoubleQuote = null;
+                        ConfigSetter();
+                        return ParseLoopReturn.Ok;
+                    }
+                    else if (c == '\\')
+                    {
+                        // Setup for next character to be escaped
+                        Status("found start of escaped character");
+                        state = State.Escape;
+                        return ParseLoopReturn.Ok;
+                    }
+                    else
+                    {
+                        // Just part of the string, on to the buffer it goes
+                        buffer += c;
+                        return ParseLoopReturn.Ok;
+                    }
+                }
+                else if (c == ' ')
+                {
+                    Status("found whitespace");
+                    switch (state)
+                    {
+                        case State.StartOfLine:
+                        case State.KeyValueDelim:
+                        case State.EndOfLine:
+                            return ParseLoopReturn.Ok;
+                        case State.KeyEnd:
+                            state = State.KeyValueDelim;
+                            return ParseLoopReturn.Ok;
+                        case State.Float:
+                        case State.PostDecimal:
+                            ConfigSetter();
+                            return ParseLoopReturn.Ok;
+                        case State.UnknowKey:
+                            return Error(string.Format("Unknown key: `{0}`", line_buffer));
+                        case State.MaybeKeyRepeat:
+                            return Error(string.Format("{0} key is appears on lines {1} and {2}; keys may only be used once.", KeyToString(), symbolTrack[key.Value], line_no));
+                        default:
+                            throw BadEnum();
+                    }
+                }
+                else if (state == State.UnknowKey)
+                {
+                    // We don't always want to immediatly error out if we find an unknown key
+                    // continue even through we know we're in a fail state
+                    return ParseLoopReturn.Ok;
+                }
+                else if (state == State.KeyEnd)
+                {
+                    // the setting name was expected to end but we found a character
+                    // other than the expected whitespace - enter a fail state
+                    return Error("Unknown key (perhaps missing whitespace?)");
+                }
+                else if ((state == State.EndOfLine || state == State.StartOfLine) && c == '#')
+                {
+                    // comments can be at the end or start of a line (not in
+                    // the middle of setting line) - mark everything else on
+                    // this line to be ignored
+                    Status("found a comment start #");
+                    state = State.Ignore;
+                    return ParseLoopReturn.Ok;
+                }
+                else if (state == State.EndOfLine)
+                {
+                    // the line was expected to end but we found a character
+                    // other than the expected line break or comment - enter a fail state
+                    return Error("Unexpected characters after value; each line must have only a key and a value");
+                }
+                else if (state == State.StartOfLine)
+                {
+                    // We have a character that is comment starter or whitespace
+                    // and we are at the start of the line - start key parsing
+                    Status(string.Format("found key start"));
+                    state = State.Key;
+                    key_idx = 1;
+
+                    // Use the first character in the setting name to
+                    // pair down the possibe settings this setting
+                    // name might refer to
+
+                    switch (c)
+                    {
+                        case 'x':
+                        case 'X':
+                            treePath = TreePath.XPath;
+                            Status("explore keys starting with x");
+                            break;
+                        case 'y':
+                        case 'Y':
+                            treePath = TreePath.YPath;
+                            Status("explore keys starting with y");
+                            break;
+                        case 'z':
+                        case 'Z':
+                            treePath = TreePath.ZPath;
+                            Status("explore keys starting with z");
+                            break;
+                        case 'S':
+                        case 's':
+                            treePath = TreePath.SPath;
+                            Status("explore keys starting with s");
+                            break;
+                        case 'T':
+                        case 't':
+                            Status("key may be `tag`");
+                            return SymHelper(ConfigKeySymbols.PrinterTag, null);
+                        default:
+                            UnknownKey();
+                            break;
+                    }
+                    return ParseLoopReturn.Ok;
+                }
+                else if (state == State.KeyValueDelim)
+                {
+                    // We have seen a key/value deliminator and
+                    // have found a non whitespace character - parse
+                    // it as the settings value
+                    switch (expect)
+                    {
+                        case Expect.String:
+                            // the setting takes a string value and a string
+                            // value must be quoted - make sure we have a quote
+                            // and remember if it was a single or double so the
+                            // end quote can be matched
+                            expect = null;
+                            switch (c)
+                            {
+                                case '\'':
+                                    state = State.String;
+                                    isDoubleQuote = false;
+                                    return ParseLoopReturn.Ok;
+                                case '"':
+                                    state = State.String;
+                                    isDoubleQuote = true;
+                                    return ParseLoopReturn.Ok;
+                                default:
+                                    return Error("Expected a string value but value is not quoted");
+                            }
+                        case Expect.Float:
+                            // The setting takes a float value
+                            state = State.Float;
+                            expect = null;
+                            return ParseNumeric(c);
+                        default:
+                            throw BadEnum();
+                    }
+                }
+                else if (state == State.Float)
+                {
+                    // Continue parsing float value
+                    return ParseNumeric(c);
+                }
+                else if (state == State.PostDecimal)
+                {
+                    // Continue parsing float value - if we're here
+                    // a decimal point has been seen and further
+                    // decimal points are an error
+                    return ParseNumericNoDecimal(c, true);
+                }
+                else
+                {
+                    return Error("Uknown state");
+                }
+            }
+
             public IEnumerator<int> ParseConfig()
             {
                 state = State.StartOfLine;
@@ -369,7 +893,7 @@ namespace IngameScript
                 buffer = null;
                 line_no = 1;
                 treePath = null;
-                stringQuote = null;
+                isDoubleQuote = null;
 
                 symbolTrack = new Dictionary<ConfigKeySymbols, int> {
                     { ConfigKeySymbols.XPos, 0 },
@@ -414,6 +938,8 @@ namespace IngameScript
 
                 }
 
+                /// After parsing we may have a hanging
+                /// value - set it if we do
                 switch (state)
                 {
                     case State.Float:
@@ -423,6 +949,7 @@ namespace IngameScript
 
                 }
 
+                // Finally apply defaults
 
                 if (cfObj.xForwardTag == null)
                 {
@@ -478,439 +1005,28 @@ namespace IngameScript
 
                 ErrorOut:;
             }
-
-            void ProgressKeyState(bool finish)
-            {
-                if (finish)
-                {
-                    state = State.KeyEnd;
-                    key_idx = 0;
-                }
-                else
-                {
-                    key_idx += 1;
-                }
-            }
-
-            void UnknownKey()
-            {
-                state = State.UnknowKey;
-                key_idx = 0;
-                treePath = null;
-                key = null;
-            }
-
-            ParseLoopReturn SymHelper(ConfigKeySymbols sym, bool? con)
-            {
-                if (symbolTrack[sym] == 0)
-                {
-                    symbolTrack[sym] = line_no;
-                    expect = GetSymExpectedType(sym);
-                    key = sym;
-                    treePath = null;
-
-                    if (con != null)
-                    {
-                        ProgressKeyState(!con.Value);
-                    }
-
-
-                    return ParseLoopReturn.Ok;
-                }
-                else if (con.Value)
-                {
-                    // If we end up here then either the key is bad or the key is repeated
-                    // but we don't know which yet
-                    state = State.MaybeKeyRepeat;
-                    key = sym;
-                    return ParseLoopReturn.Ok;
-                }
-                else {
-                    return Error(string.Format("{0} key is appears on lines {1} and {2}; keys may only be used once.", KeyToString(sym), symbolTrack[sym], line_no));
-                }
-            }
-
-            ParseLoopReturn DimHelper(char c, ConfigKeySymbols pos, ConfigKeySymbols neg, ConfigKeySymbols ext)
-            {
-                switch (c)
-                {
-                    case '+':
-                        return SymHelper(pos, false);
-                    case '-':
-                        return SymHelper(neg, false);
-                    case 'e':
-                    case 'E':
-                        return SymHelper(ext, true);
-                    default:
-                        UnknownKey();
-                        return ParseLoopReturn.Ok;
-                }
-            }
-
-            ParseLoopReturn KeyParseHelper(int key_offset, char test, params char[] cs)
-            {
-                int idx = 2 * (key_idx - key_offset);
-
-                Status(String.Format("test possible key letter `{0}` (key_idx: {3}, expect `{1}` or `{2}`)", test, cs[idx], cs[idx + 1], key_idx));
-
-                if (cs[idx] == test || cs[idx + 1] == test)
-                {
-                    ProgressKeyState(idx + 2 == cs.Length);
-                }
-                else
-                {
-                    UnknownKey();
-                }
-                return ParseLoopReturn.Ok;
-            }
-
-            void ConfigSetter()
-            {
-                ConfigSetter(buffer);
-            }
-
-            ParseLoopReturn ParseNumeric(char c)
-            {
-                switch (c) {
-                    case '0':
-                    case '1':
-                    case '2':
-                    case '3':
-                    case '4':
-                    case '5':
-                    case '6':
-                    case '7':
-                    case '8':
-                    case '9':
-                        buffer += c;
-                        return ParseLoopReturn.Ok;
-                    case '.':
-                    case ',':
-                        buffer += c;
-                        state = State.PostDecimal;
-                        return ParseLoopReturn.Ok;
-                    default:
-                        return Error(string.Format("Character not allowed: expected float value, found `{0}`", c));
-                }
-            }
-
-            ParseLoopReturn ParseNumericNoDecimal(char c, bool isFloat)
-            {
-                switch (c)
-                {
-                    case '0':
-                    case '1':
-                    case '2':
-                    case '3':
-                    case '4':
-                    case '5':
-                    case '6':
-                    case '7':
-                    case '8':
-                    case '9':
-                        buffer += c;
-                        return ParseLoopReturn.Ok;
-                    case '.':
-                    case ',':
-                        if (isFloat)
-                        {
-                            return Error("Invalid floating point number (multiple decimal points?)");
-                        }
-                        else
-                        {
-                            return Error("Invalid integer, no decimal points allowed");
-                        }
-                    default:
-                        return Error(string.Format("Character not allowed: expected float value, found `{0}`", c));
-                }
-            }
-
-            char StringDescribe(StringQuote sq)
-            {
-                switch(sq) {
-                    case StringQuote.Double:
-                        return '"';
-                    case StringQuote.Single:
-                        return '\'';
-                    default:
-                        throw new Exception("unknown enum member");
-                }
-            }
-
-            Exception BadEnum()
-            {
-                return new Exception("Uknown enum member");
-            }
-
-            private ParseLoopReturn ParseLoop(char c)
-            {
-                if (c == '\n')
-                {
-                    Status("found new line");
-                    switch (state)
-                    {
-                        case State.String:
-                        case State.Escape:
-                            return Error(string.Format("String does not have closing quote (opened with a {0})", StringDescribe(stringQuote.Value)));
-                        case State.Key:
-                        case State.KeyValueDelim:
-                        case State.KeyEnd:
-                        case State.UnknowKey:
-                        case State.MaybeKeyRepeat:
-                            return Error("Unexpected line end; line must must have a key and a value but only found key or partial key");
-                        case State.Float:
-                        case State.PostDecimal:
-                            ConfigSetter();
-                            return ParseLoopReturn.NewLine;
-                        case State.EndOfLine:
-                        case State.StartOfLine:
-                        case State.Ignore:
-                            return ParseLoopReturn.NewLine;
-                        default:
-                            throw BadEnum();
-                    }
-                }
-                else if (state == State.Ignore)
-                {
-                    return ParseLoopReturn.Ok;
-                }
-                else if (state == State.Key)
-                {
-                    if (key != null)
-                    {
-                        switch (key)
-                        {
-                            case ConfigKeySymbols.PrinterTag:
-                                return KeyParseHelper(1, c, 'a', 'A', 'g', 'G');
-                            case ConfigKeySymbols.Step:
-                                return KeyParseHelper(2, c, 'e', 'E', 'p', 'P');
-                            case ConfigKeySymbols.Speed:
-                                return KeyParseHelper(2, c, 'e', 'E', 'e', 'E', 'd', 'D');
-                            case ConfigKeySymbols.XExt:
-                            case ConfigKeySymbols.YExt:
-                            case ConfigKeySymbols.ZExt:
-                                return KeyParseHelper(2, c, 'x', 'X', 't', 'T');
-                            default:
-                                throw BadEnum();
-                        }
-                    }
-                    else
-                    {
-                        switch (treePath)
-                        {
-                            case TreePath.XPath:
-                                return DimHelper(c, ConfigKeySymbols.XPos, ConfigKeySymbols.XNeg, ConfigKeySymbols.XExt);
-                            case TreePath.YPath:
-                                return DimHelper(c, ConfigKeySymbols.YPos, ConfigKeySymbols.YNeg, ConfigKeySymbols.YExt);
-                            case TreePath.ZPath:
-                                return DimHelper(c, ConfigKeySymbols.ZPos, ConfigKeySymbols.ZNeg, ConfigKeySymbols.ZExt);
-                            case TreePath.SPath:
-                                switch (c)
-                                {
-                                    case 't':
-                                    case 'T':
-                                        return SymHelper(ConfigKeySymbols.Speed, true);
-                                    case 'p':
-                                    case 'P':
-                                        return SymHelper(ConfigKeySymbols.Speed, true);
-                                    default:
-                                        UnknownKey();
-                                        return ParseLoopReturn.Ok;
-                                }
-                            default:
-                                throw BadEnum();
-                        }
-                    }
-                }
-                else if (state == State.Escape)
-                {
-                    if (c == '\'' || c == '\\' || c == '"')
-                    {
-                        Status("found escaped character");
-                        state = State.String;
-                        buffer += c;
-                        return ParseLoopReturn.Ok;
-                    }
-                    else
-                    {
-                        return Error("Only `\"`, `'` and `\\` characters can be escaped");
-                    }
-                }
-                else if ((c == '\'' && stringQuote == StringQuote.Single) || (c == '"' && stringQuote == StringQuote.Double))
-                {
-                    Status("found end of quoted string");
-                    stringQuote = null;
-                    ConfigSetter();
-                    return ParseLoopReturn.Ok;
-                }
-                else if (state == State.String)
-                {
-                    if (c == '\\')
-                    {
-                        Status("found start of escaped character");
-                        state = State.Escape;
-                        return ParseLoopReturn.Ok;
-                    }
-                    else if (c == '\'' || c == '"')
-                    {
-                        return Error("Unexpected quote in string (escape the quote if you meant to use it)");
-                    }
-                    else
-                    {
-                        buffer += c;
-                        return ParseLoopReturn.Ok;
-                    }
-                }
-                else if (c == ' ')
-                {
-                    Status("found whitespace");
-                    switch (state)
-                    {
-                        case State.StartOfLine:
-                        case State.KeyValueDelim:
-                        case State.EndOfLine:
-                            return ParseLoopReturn.Ok;
-                        case State.KeyEnd:
-                            state = State.KeyValueDelim;
-                            return ParseLoopReturn.Ok;
-                        case State.Float:
-                        case State.PostDecimal:
-                            ConfigSetter();
-                            return ParseLoopReturn.Ok;
-                        case State.UnknowKey:
-                            return Error(string.Format("Unknown key: `{0}`", line_buffer));
-                        case State.MaybeKeyRepeat:
-                            return Error(string.Format("{0} key is appears on lines {1} and {2}; keys may only be used once.", KeyToString(), symbolTrack[key.Value], line_no));
-                        default:
-                            throw BadEnum();
-                    }
-                }
-                else if (state == State.UnknowKey)
-                {
-                    return ParseLoopReturn.Ok;
-                }
-                else if (state == State.KeyEnd)
-                {
-                    return Error("Unknown key (perhaps missing whitespace?)");
-                }
-                else if ((state == State.EndOfLine || state == State.StartOfLine) && c == '#')
-                {
-                    Status("found a comment start #");
-                    state = State.Ignore;
-                    return ParseLoopReturn.Ok;
-                }
-                else if (state == State.EndOfLine)
-                {
-                    return Error("Unexpected characters after value; each line must have only a key and a value");
-                }
-                else if (state == State.StartOfLine)
-                {
-                    Status(string.Format("found key start"));
-                    state = State.Key;
-                    key_idx = 1;
-
-                    switch (c)
-                    {
-                        case 'x':
-                        case 'X':
-                            treePath = TreePath.XPath;
-                            Status("explore keys starting with x");
-                            break;
-                        case 'y':
-                        case 'Y':
-                            treePath = TreePath.YPath;
-                            Status("explore keys starting with y");
-                            break;
-                        case 'z':
-                        case 'Z':
-                            treePath = TreePath.ZPath;
-                            Status("explore keys starting with z");
-                            break;
-                        case 'S':
-                        case 's':
-                            treePath = TreePath.SPath;
-                            Status("explore keys starting with s");
-                            break;
-                        case 'T':
-                        case 't':
-                            Status("key may be `tag`");
-                            return SymHelper(ConfigKeySymbols.PrinterTag, null);
-                        default:
-                            UnknownKey();
-                            break;
-                    }
-                    return ParseLoopReturn.Ok;
-                }
-                else if (state == State.KeyValueDelim)
-                {
-                    switch (expect)
-                    {
-                        case Expect.String:
-                            expect = null;
-                            switch (c)
-                            {
-                                case '\'':
-                                    state = State.String;
-                                    stringQuote = StringQuote.Single;
-                                    return ParseLoopReturn.Ok;
-                                case '"':
-                                    state = State.String;
-                                    stringQuote = StringQuote.Double;
-                                    return ParseLoopReturn.Ok;
-                                default:
-                                    return Error("Expected a string value but value is not quoted");
-                            }
-                        case Expect.Float:
-                            state = State.Float;
-                            expect = null;
-                            return ParseNumeric(c);
-                        default:
-                            throw BadEnum();
-                    }
-                }
-                else if (state == State.Float)
-                {
-                    return ParseNumeric(c);
-                }
-                else if (state == State.PostDecimal)
-                {
-                    return ParseNumericNoDecimal(c, true);
-                }
-                else
-                {
-                    return Error("Uknown state");
-                }
-            }
         }
 
 
         class ProgramSetup
         {
             Config CF;
-            PrinterState State;
+            PrinterPistons State;
             InfoDisplay InfoOut;
+            List<IMyPistonBase> secondRun;
 
-            public ProgramSetup(Config cf, PrinterState ps, InfoDisplay display)
+            public ProgramSetup(Config cf, PrinterPistons ps, InfoDisplay display)
             {
                 CF = cf;
                 State = ps;
                 InfoOut = display;
             }
 
-            IEnumerable<int> Setup()
+            public void GetPistonTags(IMyPistonBase piston)
             {
-                if (!State.init)
-                {
-                    State.InitVars();
-                    State.InitPistons();
-                    yield return 1;
-                    State.InitDirectionMap();
-                    yield return 1;
-                }
-            }
+                // PRF = Printer Reference Frame
+                // GRF = Global Reference Fram
 
-            public void getPistonTags(IMyPistonBase piston)
-            {
                 // Is the piston tagged, which direction is it tagged for?
                 PistonDirection? maybeDirectionPRF = null;
                 foreach (var pistonDirectionPRF in State.pistonDirectionList)
@@ -935,16 +1051,8 @@ namespace IngameScript
                 if (maybeDirectionPRF.HasValue)
                 {
                     var direction = maybeDirectionPRF.Value;
-                    if (State.directonMap[forwardDirectionGRF] == null)
-                    {
-                        // If this `forward` direction has not been seen before then
-                        // and this piston is tagged then we learn what tag points in
-                        // this direction
-
-                        State.directonMap[forwardDirectionGRF] = direction;
-                        State.directonMap[Base6Directions.GetOppositeDirection(forwardDirectionGRF)] = PistonDirectionInvert(direction);
-                    }
-                    else if (direction != State.directonMap[forwardDirectionGRF])
+                    
+                    if (direction != State.directonMap[forwardDirectionGRF])
                     {
                         // If this `forward` direction has been seen before but 
                         // the tag is different then we can't continuie as the 
@@ -953,18 +1061,69 @@ namespace IngameScript
                         InfoOut.addError("Multiple pistons with `" + PistonDirectionToString(direction) + "` tag are in different orientations");
                         return;
                     }
-                    State.pistonAdd(direction, piston);
+                    else
+                    {
+                        if (State.directonMap[forwardDirectionGRF] == null)
+                        {
+                            // If this `forward` direction has not been seen before then
+                            // and this piston is tagged then we learn what tag points in
+                            // this direction
+
+                            State.directonMap[forwardDirectionGRF] = direction;
+                            State.directonMap[Base6Directions.GetOppositeDirection(forwardDirectionGRF)] = PistonDirectionInvert(direction);
+                        }
+                        State.AddPiston(direction, piston);
+                    }
                 }
-                else if (State.directionTagged(forward))
+                else if (State.DirectionIsTagged(forwardDirectionGRF))
                 {
                     // There's no tag for this piston but if a tagged piston already
                     // told us what this pistons direction is we're good
-                    State.pistonAdd(forward, piston);
+                    State.AddPiston(forwardDirectionGRF, piston);
                 }
                 else
                 {
                     // Not enough info at this time, we'll need to take another look later
                     secondRun.Add(piston);
+                }
+            }
+
+            public IEnumerator<int> SecondRun()
+            {
+                int ops = 0;
+                bool notFound = false;
+                foreach (var piston in secondRun)
+                {
+                    var forwardDirectionGRF = piston.Orientation.Forward;
+
+                    // If we have learnt what direction this pistion is meant to be facing in
+                    // then add it as appropiate otherwise we don't have enough information
+                    // and enter a fail state
+
+                    if (State.DirectionIsTagged(forwardDirectionGRF))
+                    {
+                        State.AddPiston(forwardDirectionGRF, piston);
+                    }
+                    else
+                    {
+                        notFound = true;
+                        break;
+                    }
+
+                    if (ops == 5)
+                    {
+                        ops = 0;
+                        yield return 1;
+                    }
+                    else
+                    {
+                        ops += 1;
+                    }
+                }
+
+                if (notFound)
+                {
+                    yield return 0;
                 }
             }
         }
